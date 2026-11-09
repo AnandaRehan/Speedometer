@@ -55,7 +55,7 @@ jobs:
       - name: Generate Gradle Wrapper if missing
         run: |
           if [ ! -f ./gradlew ]; then
-            gradle wrapper --gradle-version 9.4.1
+            gradle wrapper
           fi
           true
 
