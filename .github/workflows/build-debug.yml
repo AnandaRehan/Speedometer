@@ -55,7 +55,7 @@ jobs:
       - name: Generate Gradle Wrapper if missing
         run: |
           if [ ! -f ./gradlew ]; then
-            gradle wrapper
+            gradle wrapper --gradle-version 9.5.0
           fi
           true
 
@@ -91,7 +91,7 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v6
         with:
-          name: Lashint_Bot-debug-apk
+          name: Speedometer-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 4
 
