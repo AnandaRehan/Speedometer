@@ -1,0 +1,144 @@
+name: Build Signed Release APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    name: Build Signed Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Checking Environment
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "Keystore release.jks decoded successfully."
+          else
+            echo "No KEYSTORE_BASE64 secret provided."
+          fi
+          if [ -f "$RUNNER_TEMP/release.jks" ]; then
+            echo "release.jks file exists."
+            if [ -n "$RELEASE_STORE_PASSWORD" ]; then
+              echo "STORE_PASSWORD secret is configured."
+            else
+              echo "WARNING: STORE_PASSWORD secret is empty. Release build will fallback to debug signing."
+            fi
+            if [ -n "$RELEASE_KEY_ALIAS" ]; then
+              echo "KEY_ALIAS secret is configured."
+            else
+              echo "WARNING: KEY_ALIAS secret is empty. Defaulting alias to 'upload'."
+            fi
+          else
+            echo "release.jks not found"
+          fi
+
+      - name: Generate Gradle Wrapper if missing
+        run: |
+          if [ ! -f ./gradlew ]; then
+            gradle wrapper --gradle-version 9.4.1
+          fi
+          true
+
+      - name: Beri Izin Akses Gradle
+        run: chmod +x gradlew
+
+      - name: Run Unit Tests & Capture Screenshots
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -f "$RUNNER_TEMP/release.jks" ]; then
+            export RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks"
+          fi
+          ./gradlew recordRoborazziDebug testDebugUnitTest --no-daemon --stacktrace || true
+
+      - name: Build Release APK
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          TIKWM_API_KEY: ${{ secrets.TIKWM_API_KEY }}
+          NAZE_API_KEY: ${{ secrets.NAZE_API_KEY }}
+        run: |
+          if [ -f "$RUNNER_TEMP/release.jks" ]; then
+            export RELEASE_STORE_FILE="$RUNNER_TEMP/release.jks"
+          fi
+          ./gradlew assembleRelease --no-daemon --no-configuration-cache --stacktrace
+
+      - name: Verify APK signature
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: Speedometer-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-results
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload UI Screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: speedometer-ui-screenshots
+          path: |
+            app/src/test/screenshots/*.png
+            app/build/outputs/roborazzi/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload UI Screenshots roborazzi
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: speedometer-ui-screenshots-roborazzi
+          path: |
+            app/build/outputs/roborazzi/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapping-${{ github.sha }}
+          path: app/build/outputs/mapping/release/mapping.txt
+          retention-days: 7
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: outputs
+          path: app/build/outputs/*
+          retention-days: 90
